@@ -137,22 +137,33 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     head :ok
   end
 
-  def export_search
-    query = params[:search_query].to_s
+def export_search
+    return render json: { error: 'search_query parameter is required' }, status: :unprocessable_entity if params[:search_query].blank?
+
+    query = params[:search_query].to_s.strip
     sanitized_query = ActiveRecord::Base.sanitize_sql_like(query)
 
-    @conversations = Current.account.conversations
+    # Respect permissions: filter conversations accessible to Current.user
+    accessible_conversations = if Current.user.administrator?
+                                Current.account.conversations
+                              else
+                                Current.account.conversations.where(inbox_id: Current.user.assigned_inboxes.pluck(:id))
+                              end
+
+    @conversations = accessible_conversations
                             .joins(:messages)
                             .where(messages: { message_type: [:incoming, :outgoing] })
                             .where('messages.content ILIKE ?', "%#{sanitized_query}%")
+                            .distinct
                             .includes(:assignee, messages: :sender)
 
     data = @conversations.map do |conversation|
+      last_msg = conversation.messages.to_a.last
       {
         id: conversation.display_id,
         status: conversation.status,
         assignee_name: conversation.assignee&.name,
-        latest_sender: conversation.messages.last&.sender&.name
+        latest_sender: last_msg&.sender&.name
       }
     end
 
