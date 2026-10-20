@@ -159,12 +159,11 @@ def export_search
     conversation_ids = @conversations.pluck(:id)
 
     # Fetch latest messages in a single batched query with sender preloaded to eliminate N+1
-    latest_messages = Message.where(conversation_id: conversation_ids)
-                             .where(message_type: [:incoming, :outgoing])
-                             .order(created_at: :desc)
+    latest_messages = Message.where(conversation_id: conversation_ids, message_type: [:incoming, :outgoing])
+                             .reorder(:conversation_id, created_at: :desc)
+                             .select('DISTINCT ON (messages.conversation_id) messages.*')
                              .includes(:sender)
-                             .group_by(&:conversation_id)
-                             .transform_values(&:first)
+                             .index_by(&:conversation_id)
 
     data = @conversations.map do |conversation|
       last_msg = latest_messages[conversation.id]
