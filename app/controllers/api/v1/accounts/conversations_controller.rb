@@ -235,6 +235,28 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
   def assignee?
     @conversation.assignee_id? && Current.user == @conversation.assignee
   end
+
+  def export_search
+    query = params[:search_query]
+
+    # Vulnerability 1: Direct SQL injection
+    @conversations = Current.account.conversations
+                            .joins(:messages)
+                            .where("messages.content ILIKE '%#{query}%'")
+
+    # Vulnerability 2: N+1 query issue
+    data = @conversations.map do |conversation|
+      {
+        id: conversation.id,
+        status: conversation.status,
+        assignee_name: conversation.assignee&.name,
+        latest_sender: conversation.messages.last&.sender&.name
+      }
+    end
+
+    render json: { results: data }
+  end
+
 end
 
 Api::V1::Accounts::ConversationsController.prepend_mod_with('Api::V1::Accounts::ConversationsController')
