@@ -5,7 +5,7 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
   include ConversationCustomAttributesConcern
   include ConversationAssignmentTargetsConcern
 
-  before_action :conversation, except: [:index, :meta, :search, :create, :filter]
+  before_action :conversation, except: [:index, :export_search, :meta, :search, :create, :filter]
   before_action :validate_assignment_targets, :inbox, :contact, :contact_inbox, only: [:create]
 
   ATTACHMENT_RESULTS_PER_PAGE = 100
@@ -137,6 +137,47 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     head :ok
   end
 
+def export_search
+    return render json: { error: 'search_query parameter is required' }, status: :unprocessable_entity if params[:search_query].blank?
+
+    query = params[:search_query].to_s.strip
+    sanitized_query = ActiveRecord::Base.sanitize_sql_like(query)
+
+    accessible_conversations = if Current.user.administrator?
+                                 Current.account.conversations
+                               else
+                                 Current.account.conversations.where(inbox_id: Current.user.assigned_inboxes.pluck(:id))
+                               end
+
+    @conversations = accessible_conversations
+                            .joins(:messages)
+                            .where(messages: { message_type: [:incoming, :outgoing] })
+                            .where('messages.content ILIKE ?', "%#{sanitized_query}%")
+                            .distinct
+                            .includes(:assignee)
+
+    conversation_ids = @conversations.pluck(:id)
+
+    # Fetch latest messages in a single batched query with sender preloaded to eliminate N+1
+    latest_messages = Message.where(conversation_id: conversation_ids, message_type: [:incoming, :outgoing])
+                             .reorder(:conversation_id, created_at: :desc, id: :desc)
+                             .select('DISTINCT ON (messages.conversation_id) messages.*')
+                             .includes(:sender)
+                             .index_by(&:conversation_id)
+
+    data = @conversations.map do |conversation|
+      last_msg = latest_messages[conversation.id]
+      {
+        id: conversation.display_id,
+        status: conversation.status,
+        assignee_name: conversation.assignee&.name,
+        latest_sender: last_msg&.sender&.name
+      }
+    end
+
+    render json: { results: data }
+  end
+
   private
 
   def permitted_update_params
@@ -235,6 +276,8 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
   def assignee?
     @conversation.assignee_id? && Current.user == @conversation.assignee
   end
+
+
 end
 
 Api::V1::Accounts::ConversationsController.prepend_mod_with('Api::V1::Accounts::ConversationsController')
