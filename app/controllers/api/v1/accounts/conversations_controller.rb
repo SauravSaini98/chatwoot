@@ -160,7 +160,7 @@ def export_search
 
     # Fetch latest messages in a single batched query with sender preloaded to eliminate N+1
     latest_messages = Message.where(conversation_id: conversation_ids, message_type: [:incoming, :outgoing])
-                             .reorder(:conversation_id, created_at: :desc)
+                             .reorder(:conversation_id, created_at: :desc, id: :desc)
                              .select('DISTINCT ON (messages.conversation_id) messages.*')
                              .includes(:sender)
                              .index_by(&:conversation_id)
