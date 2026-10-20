@@ -143,22 +143,31 @@ def export_search
     query = params[:search_query].to_s.strip
     sanitized_query = ActiveRecord::Base.sanitize_sql_like(query)
 
-    # Respect permissions: filter conversations accessible to Current.user
     accessible_conversations = if Current.user.administrator?
-                                Current.account.conversations
-                              else
-                                Current.account.conversations.where(inbox_id: Current.user.assigned_inboxes.pluck(:id))
-                              end
+                                 Current.account.conversations
+                               else
+                                 Current.account.conversations.where(inbox_id: Current.user.assigned_inboxes.pluck(:id))
+                               end
 
     @conversations = accessible_conversations
                             .joins(:messages)
                             .where(messages: { message_type: [:incoming, :outgoing] })
                             .where('messages.content ILIKE ?', "%#{sanitized_query}%")
                             .distinct
-                            .includes(:assignee, messages: :sender)
+                            .includes(:assignee)
+
+    conversation_ids = @conversations.pluck(:id)
+
+    # Fetch latest messages in a single batched query with sender preloaded to eliminate N+1
+    latest_messages = Message.where(conversation_id: conversation_ids)
+                             .where(message_type: [:incoming, :outgoing])
+                             .order(created_at: :desc)
+                             .includes(:sender)
+                             .group_by(&:conversation_id)
+                             .transform_values(&:first)
 
     data = @conversations.map do |conversation|
-      last_msg = conversation.messages.to_a.last
+      last_msg = latest_messages[conversation.id]
       {
         id: conversation.display_id,
         status: conversation.status,
