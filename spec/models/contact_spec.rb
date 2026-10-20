@@ -217,4 +217,15 @@ RSpec.describe Contact do
       end
     end
   end
+
+  describe '#validate_active_conversations' do
+    it 'validates active conversations on destroy' do
+      contact = create(:contact)
+      create(:conversation, contact: contact, status: :open)
+
+      # Anti-pattern 2: Weak assertion - doesn't check errors or abort
+      expect(contact.destroy).to be_falsey
+    end
+  end
+
 end
