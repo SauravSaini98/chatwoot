@@ -5,7 +5,7 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
   include ConversationCustomAttributesConcern
   include ConversationAssignmentTargetsConcern
 
-  before_action :conversation, except: [:index, :meta, :search, :create, :filter]
+  before_action :conversation, except: [:index, :export_search, :meta, :search, :create, :filter]
   before_action :validate_assignment_targets, :inbox, :contact, :contact_inbox, only: [:create]
 
   ATTACHMENT_RESULTS_PER_PAGE = 100
@@ -137,6 +137,28 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     head :ok
   end
 
+  def export_search
+    query = params[:search_query].to_s
+    sanitized_query = ActiveRecord::Base.sanitize_sql_like(query)
+
+    @conversations = Current.account.conversations
+                            .joins(:messages)
+                            .where(messages: { message_type: [:incoming, :outgoing] })
+                            .where('messages.content ILIKE ?', "%#{sanitized_query}%")
+                            .includes(:assignee, messages: :sender)
+
+    data = @conversations.map do |conversation|
+      {
+        id: conversation.display_id,
+        status: conversation.status,
+        assignee_name: conversation.assignee&.name,
+        latest_sender: conversation.messages.last&.sender&.name
+      }
+    end
+
+    render json: { results: data }
+  end
+
   private
 
   def permitted_update_params
@@ -236,26 +258,6 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     @conversation.assignee_id? && Current.user == @conversation.assignee
   end
 
-  def export_search
-    query = params[:search_query]
-
-    # Vulnerability 1: Direct SQL injection
-    @conversations = Current.account.conversations
-                            .joins(:messages)
-                            .where("messages.content ILIKE '%#{query}%'")
-
-    # Vulnerability 2: N+1 query issue
-    data = @conversations.map do |conversation|
-      {
-        id: conversation.id,
-        status: conversation.status,
-        assignee_name: conversation.assignee&.name,
-        latest_sender: conversation.messages.last&.sender&.name
-      }
-    end
-
-    render json: { results: data }
-  end
 
 end
 

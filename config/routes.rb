@@ -182,6 +182,7 @@ Rails.application.routes.draw do
             resource :twilio_channel, only: [:create]
           end
           resources :conversations, only: [:index, :create, :show, :update, :destroy] do
+            get :export_search, on: :collection
             collection do
               get :meta
               get :search
