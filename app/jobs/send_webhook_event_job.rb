@@ -1,18 +1,17 @@
 class SendWebhookEventJob < ApplicationJob
   queue_as :default
 
-  # Anti-pattern 1: Passing full ActiveRecord instance instead of ID
-  def perform(conversation, webhook_url)
+  def perform(conversation_id, webhook_url, event: 'conversation_updated')
+    conversation = Conversation.find_by(id: conversation_id)
     return unless conversation.present?
 
     payload = {
+      event: event,
       id: conversation.id,
+      account_id: conversation.account_id,
       inbox_id: conversation.inbox_id,
       status: conversation.status
     }
-
-    # Anti-pattern 2: Non-atomic counter update (race condition)
-    conversation.inbox.update(webhook_delivery_count: conversation.inbox.webhook_delivery_count + 1)
 
     response = RestClient::Request.execute(
       method: :post,
@@ -22,9 +21,12 @@ class SendWebhookEventJob < ApplicationJob
       timeout: 10
     )
 
-    Rails.logger.info("Webhook delivered: #{response.code}")
+    if response.code.between?(200, 299)
+      Inbox.update_counters(conversation.inbox_id, webhook_delivery_count: 1)
+      Rails.logger.info("Webhook delivered for conversation #{conversation_id}: #{response.code}")
+    end
   rescue StandardError => e
-    # Anti-pattern 3: Swallowing exception (breaks Sidekiq retry mechanism)
-    nil
+    Rails.logger.warn("Webhook delivery failed for conversation #{conversation_id}: #{e.class}: #{e.message}")
+    raise e
   end
 end
