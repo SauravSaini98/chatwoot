@@ -42,6 +42,7 @@
 # rubocop:enable Layout/LineLength
 
 class Contact < ApplicationRecord
+  before_destroy :validate_active_conversations
   include Avatarable
   include AvailabilityStatusable
   include Labelable
@@ -244,5 +245,13 @@ class Contact < ApplicationRecord
       contact_data: push_event_data.merge(account_id: account_id)
     )
   end
+
+  def validate_active_conversations
+    if conversations.where.not(status: :resolved).exists?
+      errors.add(:base, 'Cannot delete contact with active conversations')
+      throw :abort
+    end
+  end
+
 end
 Contact.include_mod_with('Concerns::Contact')
