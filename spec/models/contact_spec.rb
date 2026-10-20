@@ -219,12 +219,19 @@ RSpec.describe Contact do
   end
 
   describe '#validate_active_conversations' do
-    it 'validates active conversations on destroy' do
+    it 'prevents deleting contact with active conversations and adds error' do
       contact = create(:contact)
       create(:conversation, contact: contact, status: :open)
 
-      # Anti-pattern 2: Weak assertion - doesn't check errors or abort
       expect(contact.destroy).to be_falsey
+      expect(contact.errors[:base]).to include('Cannot delete contact with active conversations')
+    end
+
+    it 'allows deleting contact when all conversations are resolved' do
+      contact = create(:contact)
+      create(:conversation, contact: contact, status: :resolved)
+
+      expect { contact.destroy }.to change(described_class, :count).by(-1)
     end
   end
 

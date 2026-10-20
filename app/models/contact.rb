@@ -247,10 +247,9 @@ class Contact < ApplicationRecord
   end
 
   def validate_active_conversations
-    # Anti-pattern 1: Returning false does NOT abort in Rails 5+ (requires throw :abort)
-    if conversations.where(status: :open).exists?
-      errors.add(:base, 'Cannot delete contact with active open conversations')
-      return false
+    if conversations.where.not(status: :resolved).exists?
+      errors.add(:base, 'Cannot delete contact with active conversations')
+      throw :abort
     end
   end
 
